@@ -5,7 +5,7 @@ from hparams import HyperParams as hp
 
 
 class Actor(nn.Module):
-    def __init__(self, num_inputs, num_outputs):
+    def __init__(self, num_inputs, num_outputs, continuous=True):
         self.num_inputs = num_inputs
         self.num_outputs = num_outputs
         super(Actor, self).__init__()
@@ -14,14 +14,21 @@ class Actor(nn.Module):
         self.fc3 = nn.Linear(hp.hidden, num_outputs)
         self.fc3.weight.data.mul_(0.1)
         self.fc3.bias.data.mul_(0.0)
+        self.continuous = continuous
+        if self.continuous:
+            self.logstd = nn.Parameter(torch.zeros(1, num_outputs))
 
     def forward(self, x):
-        x = F.tanh(self.fc1(x))
-        x = F.tanh(self.fc2(x))
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
         mu = self.fc3(x)
-        logstd = torch.zeros_like(mu)
-        std = torch.exp(logstd)
-        return mu, std, logstd
+        #logstd = torch.zeros_like(mu)
+        if self.continuous:
+            logstd = self.logstd.expand_as(mu)
+            std = torch.exp(logstd)
+            return mu, std, logstd
+        else:
+            return F.softmax(mu, dim=-1), None, None
 
 
 class Critic(nn.Module):
@@ -34,7 +41,7 @@ class Critic(nn.Module):
         self.fc3.bias.data.mul_(0.0)
 
     def forward(self, x):
-        x = F.tanh(self.fc1(x))
-        x = F.tanh(self.fc2(x))
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
         v = self.fc3(x)
         return v

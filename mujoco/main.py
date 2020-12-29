@@ -19,6 +19,7 @@ parser.add_argument('--env', type=str, default="Hopper-v2",
                     help='name of Mujoco environement')
 parser.add_argument('--load_model', type=str, default=None)
 parser.add_argument('--render', default=False, action="store_true")
+parser.add_argument('--categorical', default=False, action="store_true")
 parser.add_argument('--logdir', type=str, default='logs',
                     help='tensorboardx logs directory')
 args = parser.parse_args()
@@ -43,14 +44,14 @@ if __name__=="__main__":
     torch.manual_seed(500)
 
     num_inputs = env.observation_space.shape[0]
-    num_actions = env.action_space.shape[0]
+    num_actions = 2
 
     print('state size:', num_inputs)
     print('action size:', num_actions)
 
     writer = SummaryWriter(args.logdir)
 
-    actor = Actor(num_inputs, num_actions)
+    actor = Actor(num_inputs, num_actions, not args.categorical)
     critic = Critic(num_inputs)
 
     running_state = ZFilter((num_inputs,), clip=5)
@@ -90,7 +91,7 @@ if __name__=="__main__":
 
                 steps += 1
                 mu, std, _ = actor(torch.Tensor(state).unsqueeze(0))
-                action = get_action(mu, std)[0]
+                action = get_action(mu, std, not args.categorical)[0]
                 next_state, reward, done, _ = env.step(action)
                 next_state = running_state(next_state)
 
@@ -112,7 +113,7 @@ if __name__=="__main__":
         writer.add_scalar('log/score', float(score_avg), iter)
 
         actor.train(), critic.train()
-        train_model(actor, critic, memory, actor_optim, critic_optim)
+        train_model(actor, critic, memory, actor_optim, critic_optim, not args.categorical)
 
         if iter % 100:
             score_avg = int(score_avg)
@@ -121,7 +122,7 @@ if __name__=="__main__":
             if not os.path.isdir(model_path):
                 os.makedirs(model_path)
 
-            ckpt_path = os.path.join(model_path, 'ckpt_'+ str(score_avg)+'.pth.tar')
+            ckpt_path = os.path.join(model_path, f'ckpt_{score_avg:06}.pth.tar')
 
             save_checkpoint({
                 'actor': actor.state_dict(),

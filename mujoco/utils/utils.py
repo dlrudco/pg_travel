@@ -1,18 +1,29 @@
 import torch
 import math
+import numpy as np
+import torch.nn.functional as F
 
-
-def get_action(mu, std):
-    action = torch.normal(mu, std)
-    action = action.data.numpy()
+def get_action(mu, std=None, continuous=True):
+    if continuous:
+        action = torch.normal(mu, std)
+        action = action.data.numpy()
+    else:
+        m = torch.distributions.categorical.Categorical(mu)
+        action = m.sample()
+        action = action.data.numpy().astype(np.int32)
+    
     return action
 
 
-def log_density(x, mu, std, logstd):
-    var = std.pow(2)
-    log_density = -(x - mu).pow(2) / (2 * var) \
-                  - 0.5 * math.log(2 * math.pi) - logstd
-    return log_density.sum(1, keepdim=True)
+def log_density(x, mu, std=None, logstd=None, continuous=True):
+    if continuous:
+        var = std.pow(2)
+        log_density = -(x - mu).pow(2) / (2 * var) \
+                      - 0.5 * math.log(2 * math.pi) - logstd
+        return log_density.sum(1, keepdim=True)
+    else:
+        m = torch.distributions.categorical.Categorical(mu)
+        return m.log_prob(x)
 
 
 def flat_grad(grads):
@@ -49,19 +60,26 @@ def update_model(model, new_params):
         index += params_length
 
 
-def kl_divergence(new_actor, old_actor, states):
-    mu, std, logstd = new_actor(torch.Tensor(states))
-    mu_old, std_old, logstd_old = old_actor(torch.Tensor(states))
-    mu_old = mu_old.detach()
-    std_old = std_old.detach()
-    logstd_old = logstd_old.detach()
+def kl_divergence(new_actor, old_actor, states, continuous):
+    if continuous:
+        mu, std, logstd = new_actor(torch.Tensor(states))
+        mu_old, std_old, logstd_old = old_actor(torch.Tensor(states))
+        mu_old = mu_old.detach()
+        std_old = std_old.detach()
+        logstd_old = logstd_old.detach()
 
-    # kl divergence between old policy and new policy : D( pi_old || pi_new )
-    # pi_old -> mu0, logstd0, std0 / pi_new -> mu, logstd, std
-    # be careful of calculating KL-divergence. It is not symmetric metric
-    kl = logstd_old - logstd + (std_old.pow(2) + (mu_old - mu).pow(2)) / \
-         (2.0 * std.pow(2)) - 0.5
-    return kl.sum(1, keepdim=True)
+        # kl divergence between old policy and new policy : D( pi_old || pi_new )
+        # pi_old -> mu0, logstd0, std0 / pi_new -> mu, logstd, std
+        # be careful of calculating KL-divergence. It is not symmetric metric
+        kl = logstd_old - logstd + (std_old.pow(2) + (mu_old - mu).pow(2)) / \
+             (2.0 * std.pow(2)) - 0.5
+        return kl.sum(1, keepdim=True)
+    else:
+        mu, std, logstd = new_actor(torch.Tensor(states))
+        mu_old, std_old, logstd_old = old_actor(torch.Tensor(states))
+        mu_old = mu_old.detach()
+        kl = - torch.mul(mu, torch.log(mu_old))
+        return kl.sum(1, keepdim=True)
 
 
 def save_checkpoint(state, filename='checkpoint.pth.tar'):

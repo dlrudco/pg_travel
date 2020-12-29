@@ -29,9 +29,9 @@ def get_gae(rewards, masks, values):
     return returns, advants
 
 
-def surrogate_loss(actor, advants, states, old_policy, actions):
+def surrogate_loss(actor, advants, states, old_policy, actions, continuous):
     mu, std, logstd = actor(torch.Tensor(states))
-    new_policy = log_density(torch.Tensor(actions), mu, std, logstd)
+    new_policy = log_density(torch.Tensor(actions), mu, std, logstd, continuous)
     advants = advants.unsqueeze(1)
 
     surrogate = advants * torch.exp(new_policy - old_policy)
@@ -61,9 +61,9 @@ def train_critic(critic, states, returns, advants, critic_optim):
             critic_optim.step()
 
 
-def fisher_vector_product(actor, states, p):
+def fisher_vector_product(actor, states, p, continuous):
     p.detach()
-    kl = kl_divergence(new_actor=actor, old_actor=actor, states=states)
+    kl = kl_divergence(new_actor=actor, old_actor=actor, states=states, continuous=continuous)
     kl = kl.mean()
     kl_grad = torch.autograd.grad(kl, actor.parameters(), create_graph=True)
     kl_grad = flat_grad(kl_grad)  # check kl_grad == 0
@@ -77,13 +77,13 @@ def fisher_vector_product(actor, states, p):
 
 # from openai baseline code
 # https://github.com/openai/baselines/blob/master/baselines/common/cg.py
-def conjugate_gradient(actor, states, b, nsteps, residual_tol=1e-10):
+def conjugate_gradient(actor, states, b, nsteps, residual_tol=1e-10, continuous=True):
     x = torch.zeros(b.size())
     r = b.clone()
     p = b.clone()
     rdotr = torch.dot(r, r)
     for i in range(nsteps):
-        _Avp = fisher_vector_product(actor, states, p)
+        _Avp = fisher_vector_product(actor, states, p, continuous)
         alpha = rdotr / torch.dot(p, _Avp)
         x += alpha * p
         r -= alpha * _Avp
@@ -96,8 +96,8 @@ def conjugate_gradient(actor, states, b, nsteps, residual_tol=1e-10):
     return x
 
 
-def train_model(actor, critic, memory, actor_optim, critic_optim):
-    memory = np.array(memory)
+def train_model(actor, critic, memory, actor_optim, critic_optim, continuous=True):
+    memory = np.array(memory, dtype=object)
     states = np.vstack(memory[:, 0])
     actions = list(memory[:, 1])
     rewards = list(memory[:, 2])
@@ -115,24 +115,24 @@ def train_model(actor, critic, memory, actor_optim, critic_optim):
     # ----------------------------
     # step 3: get gradient of loss and hessian of kl
     mu, std, logstd = actor(torch.Tensor(states))
-    old_policy = log_density(torch.Tensor(actions), mu, std, logstd)
+    old_policy = log_density(torch.Tensor(actions), mu, std, logstd, continuous)
 
-    loss = surrogate_loss(actor, advants, states, old_policy.detach(), actions)
+    loss = surrogate_loss(actor, advants, states, old_policy.detach(), actions, continuous)
     loss_grad = torch.autograd.grad(loss, actor.parameters())
     loss_grad = flat_grad(loss_grad)
-    step_dir = conjugate_gradient(actor, states, loss_grad.data, nsteps=10)
+    step_dir = conjugate_gradient(actor, states, loss_grad.data, nsteps=10, continuous=continuous)
 
     # ----------------------------
     # step 4: get step direction and step size and full step
     params = flat_params(actor)
-    shs = 0.5 * (step_dir * fisher_vector_product(actor, states, step_dir)
+    shs = 0.5 * (step_dir * fisher_vector_product(actor, states, step_dir, continuous)
                  ).sum(0, keepdim=True)
     step_size = 1 / torch.sqrt(shs / hp.max_kl)[0]
     full_step = step_size * step_dir
 
     # ----------------------------
     # step 5: do backtracking line search for n times
-    old_actor = Actor(actor.num_inputs, actor.num_outputs)
+    old_actor = Actor(actor.num_inputs, actor.num_outputs, continuous)
     update_model(old_actor, params)
     expected_improve = (loss_grad * full_step).sum(0, keepdim=True)
 
@@ -142,10 +142,10 @@ def train_model(actor, critic, memory, actor_optim, critic_optim):
         new_params = params + fraction * full_step
         update_model(actor, new_params)
         new_loss = surrogate_loss(actor, advants, states, old_policy.detach(),
-                                  actions)
+                                  actions, continuous)
         loss_improve = new_loss - loss
         expected_improve *= fraction
-        kl = kl_divergence(new_actor=actor, old_actor=old_actor, states=states)
+        kl = kl_divergence(new_actor=actor, old_actor=old_actor, states=states, continuous=continuous)
         kl = kl.mean()
 
         print('kl: {:.4f}  loss improve: {:.4f}  expected improve: {:.4f}  '

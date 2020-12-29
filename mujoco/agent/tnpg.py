@@ -85,7 +85,7 @@ def conjugate_gradient(actor, states, b, nsteps, residual_tol=1e-10):
 
 
 def train_model(actor, critic, memory, actor_optim, critic_optim):
-    memory = np.array(memory)
+    memory = np.array(memory, dtype=object)
     states = np.vstack(memory[:, 0])
     actions = list(memory[:, 1])
     rewards = list(memory[:, 2])

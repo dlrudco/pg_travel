@@ -28,9 +28,9 @@ def get_gae(rewards, masks, values):
     return returns, advants
 
 
-def surrogate_loss(actor, advants, states, old_policy, actions, index):
+def surrogate_loss(actor, advants, states, old_policy, actions, index, continuous):
     mu, std, logstd = actor(torch.Tensor(states))
-    new_policy = log_density(actions, mu, std, logstd)
+    new_policy = log_density(actions, mu, std, logstd, continuous)
     old_policy = old_policy[index]
 
     ratio = torch.exp(new_policy - old_policy)
@@ -38,8 +38,8 @@ def surrogate_loss(actor, advants, states, old_policy, actions, index):
     return surrogate, ratio
 
 
-def train_model(actor, critic, memory, actor_optim, critic_optim):
-    memory = np.array(memory)
+def train_model(actor, critic, memory, actor_optim, critic_optim, continuous=True):
+    memory = np.array(memory, dtype=object)
     states = np.vstack(memory[:, 0])
     actions = list(memory[:, 1])
     rewards = list(memory[:, 2])
@@ -50,7 +50,7 @@ def train_model(actor, critic, memory, actor_optim, critic_optim):
     # step 1: get returns and GAEs and log probability of old policy
     returns, advants = get_gae(rewards, masks, values)
     mu, std, logstd = actor(torch.Tensor(states))
-    old_policy = log_density(torch.Tensor(actions), mu, std, logstd)
+    old_policy = log_density(torch.Tensor(actions), mu, std, logstd, continuous)
     old_values = critic(torch.Tensor(states))
 
     criterion = torch.nn.MSELoss()
@@ -73,7 +73,7 @@ def train_model(actor, critic, memory, actor_optim, critic_optim):
 
             loss, ratio = surrogate_loss(actor, advants_samples, inputs,
                                          old_policy.detach(), actions_samples,
-                                         batch_index)
+                                         batch_index, continuous)
 
             values = critic(inputs)
             clipped_values = oldvalue_samples + \
@@ -91,11 +91,15 @@ def train_model(actor, critic, memory, actor_optim, critic_optim):
             actor_loss = -torch.min(loss, clipped_loss).mean()
 
             loss = actor_loss + 0.5 * critic_loss
-
             critic_optim.zero_grad()
+            actor_optim.zero_grad()
             loss.backward(retain_graph=True)
             critic_optim.step()
-
-            actor_optim.zero_grad()
-            loss.backward()
             actor_optim.step()
+            # critic_optim.zero_grad()
+            # loss.backward(retain_graph=True)
+            # critic_optim.step()
+
+            # actor_optim.zero_grad()
+            # loss.backward()
+            # actor_optim.step()
