@@ -78,7 +78,7 @@ def kl_divergence(new_actor, old_actor, states, continuous):
         mu, std, logstd = new_actor(torch.Tensor(states))
         mu_old, std_old, logstd_old = old_actor(torch.Tensor(states))
         mu_old = mu_old.detach()
-        kl = - torch.mul(mu, torch.log(mu_old))
+        kl = - torch.mul(mu, torch.log(torch.div(mu_old, mu)))
         return kl.sum(1, keepdim=True)
 
 

@@ -44,7 +44,13 @@ if __name__=="__main__":
     torch.manual_seed(500)
 
     num_inputs = env.observation_space.shape[0]
-    num_actions = 2
+    if isinstance(env.action_space, gym.spaces.Discrete):
+        args.categorical = True
+        
+    if args.categorical:
+        num_actions = env.action_space.n
+    else:
+        num_actions = env.action_space.shape[0]
 
     print('state size:', num_inputs)
     print('action size:', num_actions)
